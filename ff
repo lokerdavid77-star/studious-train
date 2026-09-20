@@ -1,0 +1,234 @@
+-- =================================================================
+-- vozoid hax - loader
+-- change this URL to match your repo
+-- =================================================================
+local ui = loadstring(game:HttpGet("https://raw.githubusercontent.com/lokerdavid77-star/studious-train/refs/heads/main/vozoidui.lua"))()
+
+local Lighting    = game:GetService("Lighting")
+local Players     = game:GetService("Players")
+local RunService  = game:GetService("RunService")
+local UIS         = game:GetService("UserInputService")
+local Camera      = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+local win = ui:Window({ Name = "vozoid hax", Size = UDim2.fromOffset(720, 540) })
+
+-- MAIN
+local mainTab = win:Tab("Main")
+local mainL = mainTab:Section("Main Features", "Left")
+mainL:Toggle({ Name = "Example Toggle", Flag = "MainExample", Default = false,
+    Callback = function(v) print("main toggle:", v) end })
+mainL:Slider({ Name = "Example Slider", Flag = "MainSlider", Min = 0, Max = 100, Default = 50,
+    Callback = function(v) print("main slider:", v) end })
+
+-- WORLD
+local worldTab = win:Tab("World")
+local worldL = worldTab:Section("World Settings", "Left")
+worldL:Toggle({ Name = "Fullbright", Flag = "Fullbright", Default = false,
+    Callback = function(v)
+        if v then
+            Lighting.Brightness = 2; Lighting.GlobalShadows = false
+            Lighting.Ambient = Color3.new(1,1,1)
+        else
+            Lighting.Brightness = 1; Lighting.GlobalShadows = true
+            Lighting.Ambient = Color3.new(0.5,0.5,0.5)
+        end
+    end })
+worldL:Slider({ Name = "Time of Day", Flag = "TimeOfDay",
+    Min = 0, Max = 24, Default = 12, Decimals = 1,
+    Callback = function(v) Lighting.ClockTime = v end })
+
+-- ESP
+local espTab = win:Tab("ESP")
+local espL = espTab:Section("Player ESP", "Left")
+local espEnabled = false
+local espConn, espGui, espFrames = nil, nil, {}
+local function ensureGui()
+    if espGui and espGui.Parent then return end
+    espGui = Instance.new("ScreenGui"); espGui.Name = "VozoidESP"
+    espGui.ResetOnSpawn = false
+    pcall(function() espGui.Parent = (gethui and gethui()) or game:GetService("CoreGui") end)
+end
+local function updateESP()
+    if not espEnabled then return end
+    ensureGui()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then
+            local char, hrp, hum = p.Character, nil, nil
+            if char then hrp = char:FindFirstChild("HumanoidRootPart"); hum = char:FindFirstChild("Humanoid") end
+            if hrp and hum and hum.Health > 0 then
+                local pos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+                if onScreen and pos.Z > 0 then
+                    local frame = espFrames[p]
+                    if not frame then
+                        frame = Instance.new("Frame"); frame.BorderSizePixel = 0
+                        frame.BackgroundTransparency = 0.7
+                        frame.BackgroundColor3 = Color3.fromRGB(255,130,200)
+                        frame.Parent = espGui; espFrames[p] = frame
+                    end
+                    local h = math.clamp(5000 / pos.Z, 20, 400)
+                    local w = h * 0.55
+                    frame.Size = UDim2.fromOffset(w, h)
+                    frame.Position = UDim2.fromOffset(pos.X - w/2, pos.Y - h/2)
+                    frame.Visible = true
+                elseif espFrames[p] then espFrames[p].Visible = false end
+            elseif espFrames[p] then espFrames[p].Visible = false end
+        end
+    end
+end
+espL:Toggle({ Name = "Enable ESP", Flag = "EspEnabled", Default = false,
+    Callback = function(v)
+        espEnabled = v
+        if v and not espConn then espConn = RunService.RenderStepped:Connect(updateESP)
+        elseif not v and espConn then
+            espConn:Disconnect(); espConn = nil
+            for _, f in pairs(espFrames) do f:Destroy() end
+            espFrames = {}
+            if espGui then espGui:Destroy(); espGui = nil end
+        end
+    end })
+espL:ColorPicker({ Name = "Box Color", Flag = "EspColor",
+    Default = Color3.fromRGB(255,130,200),
+    Callback = function(c)
+        for _, f in pairs(espFrames) do f.BackgroundColor3 = c end
+    end })
+
+-- VISUALS
+local visualsTab = win:Tab("Visuals")
+local visualsL = visualsTab:Section("Effects", "Left")
+visualsL:ColorPicker({ Name = "Accent Color", Flag = "AccentOverride",
+    Default = Color3.fromRGB(255,130,200),
+    Callback = function(c)
+        ui.Theme.Accent = c
+        -- update all currently-registered toggle fills to new color
+        for _, item in pairs(ui.Items) do
+            if item.Type == "Toggle" and item.Value then
+                -- the fill object isn't exposed; just retoggle to refresh
+                item:Set(true)
+            end
+        end
+    end })
+visualsL:Dropdown({ Name = "Render Quality", Flag = "RenderQuality",
+    Values = {"Low","Medium","High","Ultra"}, Default = "High",
+    Callback = function(v) print("quality:", v) end })
+
+-- CHARACTER
+local charTab = win:Tab("Character")
+local charL = charTab:Section("Movement", "Left")
+local flyGyro, flyVel, flyConn = nil, nil, nil
+local function stopFly()
+    if flyConn then flyConn:Disconnect(); flyConn = nil end
+    if flyGyro then flyGyro:Destroy(); flyGyro = nil end
+    if flyVel  then flyVel:Destroy();  flyVel  = nil end
+    local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid")
+    if hum then hum.PlatformStand = false end
+end
+local function startFly()
+    local char = LocalPlayer.Character
+    local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+    local hum  = char and char:FindFirstChild("Humanoid")
+    if not hrp or not hum then return end
+    hum.PlatformStand = true
+    flyGyro = Instance.new("BodyGyro")
+    flyGyro.MaxTorque = Vector3.new(9e9,9e9,9e9); flyGyro.P = 10000
+    flyGyro.CFrame = hrp.CFrame; flyGyro.Parent = hrp
+    flyVel = Instance.new("BodyVelocity")
+    flyVel.MaxForce = Vector3.new(9e9,9e9,9e9); flyVel.Velocity = Vector3.zero
+    flyVel.Parent = hrp
+    flyConn = RunService.RenderStepped:Connect(function()
+        if not flyGyro or not flyGyro.Parent then return end
+        flyGyro.CFrame = Camera.CFrame
+        local speed = tonumber(ui.Flags["FlySpeed"]) or 100
+        local move = Vector3.zero
+        if UIS:IsKeyDown(Enum.KeyCode.W) then move = move + Camera.CFrame.LookVector end
+        if UIS:IsKeyDown(Enum.KeyCode.S) then move = move - Camera.CFrame.LookVector end
+        if UIS:IsKeyDown(Enum.KeyCode.A) then move = move - Camera.CFrame.RightVector end
+        if UIS:IsKeyDown(Enum.KeyCode.D) then move = move + Camera.CFrame.RightVector end
+        if UIS:IsKeyDown(Enum.KeyCode.Space) then move = move + Vector3.new(0,1,0) end
+        flyVel.Velocity = move.Magnitude > 0 and move.Unit * speed or Vector3.zero
+    end)
+end
+charL:Toggle({ Name = "CFrame Fly", Flag = "Fly", Default = false,
+    Callback = function(v) if v then startFly() else stopFly() end end })
+charL:Slider({ Name = "Fly Speed", Flag = "FlySpeed",
+    Min = 20, Max = 400, Default = 100, Decimals = 0 })
+charL:Keybind({ Name = "Fly Keybind", Flag = "FlyKey", Default = Enum.KeyCode.F,
+    Callback = function() charL.Items[1]:Set(not ui.Flags["Fly"]) end })
+
+-- SETTINGS
+local settingsTab = win:Tab("Settings")
+local themeSection = settingsTab:Section("Menu Theme", "Left")
+themeSection:ColorPicker({ Name = "Background", Flag = "Cfg_Bg",
+    Default = Color3.fromRGB(18, 16, 20) })
+themeSection:ColorPicker({ Name = "Panel", Flag = "Cfg_Panel",
+    Default = Color3.fromRGB(26, 22, 30) })
+themeSection:ColorPicker({ Name = "Accent", Flag = "Cfg_Accent",
+    Default = Color3.fromRGB(255, 130, 200) })
+themeSection:ColorPicker({ Name = "Text", Flag = "Cfg_Text",
+    Default = Color3.fromRGB(230, 225, 235) })
+
+-- helper: live-apply theme colors when changed
+local function applyTheme()
+    ui.Theme.Bg    = ui.Flags["Cfg_Bg"]    or ui.Theme.Bg
+    ui.Theme.Panel = ui.Flags["Cfg_Panel"] or ui.Theme.Panel
+    ui.Theme.Accent = ui.Flags["Cfg_Accent"] or ui.Theme.Accent
+    ui.Theme.Text  = ui.Flags["Cfg_Text"]  or ui.Theme.Text
+end
+for _, flag in ipairs({"Cfg_Bg","Cfg_Panel","Cfg_Accent","Cfg_Text"}) do
+    local it = ui.Items[flag]
+    if it then
+        local orig = it.Set
+        it.Set = function(self, v)
+            orig(self, v); applyTheme()
+        end
+    end
+end
+
+local configSection = settingsTab:Section("Configs", "Right")
+configSection:Input({ Name = "Config Name", Flag = "ConfigNameIn",
+    Default = "", Placeholder = "type a name then save" })
+configSection:Button({ Name = "Save Config", Callback = function()
+    local name = ui.Flags["ConfigNameIn"]
+    if not name or name == "" then
+        warn("[vozoid] no config name"); return
+    end
+    local ok, err = Library:saveConfig(name)
+    if ok then warn("[vozoid] saved: " .. name)
+    else warn("[vozoid] save failed: " .. tostring(err)) end
+end })
+
+local cfgDrop = configSection:Dropdown({ Name = "Config List", Flag = "ConfigListDrop",
+    Values = Library:listConfigs(), Default = nil })
+
+configSection:Button({ Name = "Load", Callback = function()
+    local name = ui.Flags["ConfigListDrop"]
+    if not name then warn("[vozoid] pick a config") return end
+    local ok, err = Library:loadConfig(name)
+    if ok then warn("[vozoid] loaded: " .. name)
+    else warn("[vozoid] load failed: " .. tostring(err)) end
+end })
+configSection:Button({ Name = "Overwrite", Callback = function()
+    local name = ui.Flags["ConfigListDrop"]
+    if not name then warn("[vozoid] pick a config") return end
+    local ok, err = Library:saveConfig(name)
+    if ok then warn("[vozoid] overwrote: " .. name)
+    else warn("[vozoid] overwrite failed: " .. tostring(err)) end
+end })
+configSection:Button({ Name = "Set Autoload", Callback = function()
+    local name = ui.Flags["ConfigListDrop"]
+    if not name then warn("[vozoid] pick a config") return end
+    Library:setAutoload(name)
+    warn("[vozoid] autoload set: " .. name)
+end })
+configSection:Button({ Name = "Reset Autoload", Callback = function()
+    Library:resetAutoload()
+    warn("[vozoid] autoload cleared")
+end })
+configSection:Button({ Name = "Refresh List", Callback = function()
+    cfgDrop:Refresh(Library:listConfigs())
+end })
+configSection:Button({ Name = "Unload UI", Callback = function()
+    stopFly(); win:Destroy()
+end })
+
+print("[vozoid] loaded")
